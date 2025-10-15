@@ -1,0 +1,43 @@
+# Vagrant
+.vagrant/
+*.log
+
+# VirtualBox
+*.vdi
+*.vmdk
+
+# Docker
+docker-compose.override.yml
+
+# Backup files
+backups/
+*.backup
+*.bak
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets and sensitive data
+secrets/
+*.key
+*.pem
+*.crt
+.env
+.env.local
