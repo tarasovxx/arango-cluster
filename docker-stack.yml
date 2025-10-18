@@ -19,19 +19,17 @@ services:
       placement:
         constraints: ["node.hostname == arango-node1"]
       restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
-    entrypoint: ["sh", "-c"]
-    command: >
-      "IP=$$(hostname -i | awk '{print $$1}');
-      exec arangod
-        --server.endpoint tcp://0.0.0.0:8531
-        --agency.my-address tcp://$$IP:8531
-        --server.authentication false
-        --agency.activate true
-        --agency.size 3
-        --agency.supervision true
-        --agency.endpoint tcp://arango-agent-1:8531
-        --agency.endpoint tcp://arango-agent-2:8531
-        --agency.endpoint tcp://arango-agent-3:8531"
+    command:
+      - "arangod"
+      - "--server.endpoint=tcp://0.0.0.0:8531"
+      - "--server.authentication=false"
+      - "--agency.activate=true"
+      - "--agency.size=3"
+      - "--agency.supervision=true"
+      - "--agency.my-address=tcp://arango-agent-1:8531"
+      - "--agency.endpoint=tcp://arango-agent-1:8531"
+      - "--agency.endpoint=tcp://arango-agent-2:8531"
+      - "--agency.endpoint=tcp://arango-agent-3:8531"
 
   arango-agent-2:
     image: arangodb/arangodb:3.8.9
@@ -42,19 +40,17 @@ services:
       placement:
         constraints: ["node.hostname == arango-node2"]
       restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
-    entrypoint: ["sh", "-c"]
-    command: >
-      "IP=$$(hostname -i | awk '{print $$1}');
-      exec arangod
-        --server.endpoint tcp://0.0.0.0:8531
-        --agency.my-address tcp://$$IP:8531
-        --server.authentication false
-        --agency.activate true
-        --agency.size 3
-        --agency.supervision true
-        --agency.endpoint tcp://arango-agent-1:8531
-        --agency.endpoint tcp://arango-agent-2:8531
-        --agency.endpoint tcp://arango-agent-3:8531"
+    command:
+      - "arangod"
+      - "--server.endpoint=tcp://0.0.0.0:8531"
+      - "--server.authentication=false"
+      - "--agency.activate=true"
+      - "--agency.size=3"
+      - "--agency.supervision=true"
+      - "--agency.my-address=tcp://arango-agent-2:8531"
+      - "--agency.endpoint=tcp://arango-agent-1:8531"
+      - "--agency.endpoint=tcp://arango-agent-2:8531"
+      - "--agency.endpoint=tcp://arango-agent-3:8531"
 
   arango-agent-3:
     image: arangodb/arangodb:3.8.9
@@ -65,19 +61,17 @@ services:
       placement:
         constraints: ["node.hostname == arango-node3"]
       restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
-    entrypoint: ["sh", "-c"]
-    command: >
-      "IP=$$(hostname -i | awk '{print $$1}');
-      exec arangod
-        --server.endpoint tcp://0.0.0.0:8531
-        --agency.my-address tcp://$$IP:8531
-        --server.authentication false
-        --agency.activate true
-        --agency.size 3
-        --agency.supervision true
-        --agency.endpoint tcp://arango-agent-1:8531
-        --agency.endpoint tcp://arango-agent-2:8531
-        --agency.endpoint tcp://arango-agent-3:8531"
+    command:
+      - "arangod"
+      - "--server.endpoint=tcp://0.0.0.0:8531"
+      - "--server.authentication=false"
+      - "--agency.activate=true"
+      - "--agency.size=3"
+      - "--agency.supervision=true"
+      - "--agency.my-address=tcp://arango-agent-3:8531"
+      - "--agency.endpoint=tcp://arango-agent-1:8531"
+      - "--agency.endpoint=tcp://arango-agent-2:8531"
+      - "--agency.endpoint=tcp://arango-agent-3:8531"
 
   # --- 3 DBServer (по одному на ноду) ---
   arango-dbserver:
@@ -93,18 +87,19 @@ services:
       restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
     volumes:
       - dbserver-data:/var/lib/arangodb3
-    entrypoint: ["sh", "-c"]
-    command: >
-      "IP=$$(hostname -i | awk '{print $$1}');
-      exec arangod
-        --server.authentication false
-        --server.endpoint tcp://0.0.0.0:8530
-        --cluster.my-address tcp://$$IP:8530
-        --cluster.my-role DBSERVER
-        --cluster.agency-endpoint tcp://arango-agent-1:8531
-        --cluster.agency-endpoint tcp://arango-agent-2:8531
-        --cluster.agency-endpoint tcp://arango-agent-3:8531
-        --database.directory /var/lib/arangodb3"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        exec arangod \
+          --server.endpoint=tcp://0.0.0.0:8530 \
+          --server.authentication=false \
+          --cluster.my-address=tcp://$$HOSTNAME:8530 \
+          --cluster.my-role=DBSERVER \
+          --cluster.agency-endpoint=tcp://arango-agent-1:8531 \
+          --cluster.agency-endpoint=tcp://arango-agent-2:8531 \
+          --cluster.agency-endpoint=tcp://arango-agent-3:8531 \
+          --database.directory=/var/lib/arangodb3
 
   # --- 3 Coordinator (статлесс, публикуем 8529 через ingress) ---
   arango-coordinator:
@@ -125,16 +120,17 @@ services:
         published: 8529
         protocol: tcp
         mode: ingress
-    entrypoint: ["sh", "-c"]
-    command: >
-      "IP=$$(hostname -i | awk '{print $$1}');
-      exec arangod
-        --server.authentication false
-        --server.endpoint tcp://0.0.0.0:8529
-        --cluster.my-address tcp://$$IP:8529
-        --cluster.my-role COORDINATOR
-        --cluster.agency-endpoint tcp://arango-agent-1:8531
-        --cluster.agency-endpoint tcp://arango-agent-2:8531
-        --cluster.agency-endpoint tcp://arango-agent-3:8531
-        --database.directory /var/lib/arangodb3"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        exec arangod \
+          --server.endpoint=tcp://0.0.0.0:8529 \
+          --server.authentication=false \
+          --cluster.my-address=tcp://$$HOSTNAME:8529 \
+          --cluster.my-role=COORDINATOR \
+          --cluster.agency-endpoint=tcp://arango-agent-1:8531 \
+          --cluster.agency-endpoint=tcp://arango-agent-2:8531 \
+          --cluster.agency-endpoint=tcp://arango-agent-3:8531 \
+          --database.directory=/var/lib/arangodb3
 

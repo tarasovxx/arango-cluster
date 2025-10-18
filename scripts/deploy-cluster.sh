@@ -5,91 +5,101 @@
 
 set -e
 
-echo "=== Автоматическое развертывание ArangoDB кластера ==="
-
-# Очистка существующего окружения
-# echo "0. Очистка существующего окружения..."
-# if [ -f "scripts/cleanup-vbox.sh" ]; then
-#     chmod +x scripts/cleanup-vbox.sh
-#     ./scripts/cleanup-vbox.sh
-# else
-#     echo "Скрипт очистки не найден, пропускаем..."
-# fi
+echo "╔═══════════════════════════════════════════════════════╗"
+echo "║   ArangoDB Docker Swarm Cluster - Развертывание      ║"
+echo "╚═══════════════════════════════════════════════════════╝"
+echo ""
 
 # Проверка наличия Vagrant
 if ! command -v vagrant &> /dev/null; then
-    echo "Ошибка: Vagrant не установлен"
-    echo "Установите Vagrant с https://www.vagrantup.com/"
+    echo "❌ Ошибка: Vagrant не установлен"
+    echo "📥 Установите Vagrant с https://www.vagrantup.com/"
     exit 1
 fi
 
 # Проверка наличия VirtualBox
-# if ! command -v vboxmanage &> /dev/null; then
-#     echo "Ошибка: VirtualBox не установлен"
-#     echo "Установите VirtualBox с https://www.virtualbox.org/"
-#     exit 1
-# fi
+if ! command -v vboxmanage &> /dev/null; then
+    echo "⚠️  Предупреждение: VirtualBox может быть не установлен"
+    echo "📥 Установите VirtualBox с https://www.virtualbox.org/"
+fi
 
 # Проверка наличия Vagrantfile
 if [ ! -f "Vagrantfile" ]; then
-    echo "Ошибка: Vagrantfile не найден"
+    echo "❌ Ошибка: Vagrantfile не найден"
+    echo "📂 Запустите скрипт из корневой директории проекта"
     exit 1
 fi
 
-# echo "1. Запуск виртуальных машин..."
-# vagrant up
+# Проверка наличия docker-stack.yml
+if [ ! -f "docker-stack.yml" ]; then
+    echo "❌ Ошибка: docker-stack.yml не найден"
+    exit 1
+fi
 
-# echo ""
-# echo "2. Ожидание готовности машин..."
-# sleep 30
-
-echo ""
-echo "3. Инициализация Docker Swarm на manager ноде..."
-vagrant ssh node1 -c "sudo /opt/docker-swarm/scripts/setup-swarm.sh"
+echo "1️⃣  Запуск виртуальных машин (это займет 5-7 минут)..."
+vagrant up
 
 echo ""
-echo "4. Получение токена для присоединения worker нод..."
-WORKER_TOKEN=$(vagrant ssh node1 -c "cat /opt/docker-swarm/worker-token.txt | grep -o 'SWMTKN-[^[:space:]]*'" | tr -d '\r')
-MANAGER_IP=$(vagrant ssh node1 -c "ip addr show enp0s8 | grep 'inet ' | awk '{print \$2}' | cut -d/ -f1" | tr -d '\r')
-
-echo "Worker token: $WORKER_TOKEN"
-echo "Manager IP: $MANAGER_IP"
+echo "2️⃣  Ожидание полной инициализации Docker Swarm..."
+sleep 30
 
 echo ""
-echo "5. Присоединение worker нод к кластеру..."
-for i in 2 3; do
-    echo "Присоединение node$i..."
-    vagrant ssh node$i -c "docker swarm join --token $WORKER_TOKEN $MANAGER_IP:2377"
-done
-
-echo ""
-echo "6. Проверка статуса кластера..."
+echo "3️⃣  Проверка статуса Docker Swarm..."
 vagrant ssh node1 -c "docker node ls"
 
 echo ""
-echo "7. Развертывание ArangoDB stack..."
-vagrant ssh node1 -c "sudo /opt/docker-swarm/scripts/deploy-arango.sh"
+echo "4️⃣  Развертывание ArangoDB кластера..."
+vagrant ssh node1 -c "cd /vagrant && docker stack deploy -c docker-stack.yml arango"
 
 echo ""
-echo "8. Ожидание запуска сервисов..."
-sleep 60
+echo "5️⃣  Ожидание запуска сервисов (это займет 30-60 секунд)..."
+sleep 45
 
 echo ""
-echo "9. Проверка статуса сервисов..."
-vagrant ssh node1 -c "docker stack services arango"
+echo "6️⃣  Проверка статуса сервисов..."
+vagrant ssh node1 -c "docker service ls"
 
 echo ""
-echo "=== Развертывание завершено ==="
+echo "7️⃣  Проверка здоровья кластера ArangoDB..."
+sleep 15
+vagrant ssh node1 -c "curl -s http://localhost:8529/_api/version 2>/dev/null || echo 'Кластер еще инициализируется...'"
+
 echo ""
-echo "Доступные сервисы:"
-echo "- ArangoDB: http://arango.localhost (добавьте в /etc/hosts: $MANAGER_IP arango.localhost)"
-echo "- Traefik Dashboard: http://traefik.localhost:8080 (добавьте в /etc/hosts: $MANAGER_IP traefik.localhost)"
+echo "╔═══════════════════════════════════════════════════════╗"
+echo "║              ✅ Развертывание завершено!              ║"
+echo "╚═══════════════════════════════════════════════════════╝"
 echo ""
-echo "Управление кластером:"
-echo "- Статус: vagrant ssh node1 -c 'sudo /opt/docker-swarm/scripts/cluster-manage.sh status'"
-echo "- Логи: vagrant ssh node1 -c 'sudo /opt/docker-swarm/scripts/cluster-manage.sh logs arango-coordinator'"
-echo "- Rolling update: vagrant ssh node1 -c 'sudo /opt/docker-swarm/scripts/rolling-update.sh arango-coordinator arangodb/arangodb:3.11.1'"
+echo "🌐 Доступ к ArangoDB:"
+echo "   • Веб-интерфейс: http://localhost:8529"
+echo "   • Aardvark UI:   http://localhost:8529/_db/_system/_admin/aardvark/index.html"
+echo "   • API:           curl http://localhost:8529/_api/version"
 echo ""
-echo "Остановка кластера:"
-echo "- vagrant halt"
-echo "- vagrant destroy -f"
+echo "🔑 Вход (без пароля):"
+echo "   • Username: root (или оставьте пустым)"
+echo "   • Password: (оставьте пустым)"
+echo ""
+echo "📊 Проверка кластера:"
+echo "   • Статус сервисов:"
+echo "     vagrant ssh node1 -c 'docker service ls'"
+echo ""
+echo "   • Здоровье кластера:"
+echo "     curl http://localhost:8529/_admin/cluster/health"
+echo ""
+echo "   • Логи координаторов:"
+echo "     vagrant ssh node1 -c 'docker service logs arango_arango-coordinator'"
+echo ""
+echo "🛠️  Управление:"
+echo "   • Перезапуск кластера:"
+echo "     vagrant ssh node1 -c 'cd /vagrant && docker stack rm arango && sleep 15 && docker stack deploy -c docker-stack.yml arango'"
+echo ""
+echo "   • Остановка VM:"
+echo "     vagrant halt"
+echo ""
+echo "   • Полное удаление:"
+echo "     vagrant destroy -f"
+echo ""
+echo "📚 Документация:"
+echo "   • README.md"
+echo "   • QUICKSTART.md"
+echo "   • EXTERNAL_ACCESS.md"
+echo ""
