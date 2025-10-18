@@ -36,12 +36,12 @@ if [ ! -f "Vagrantfile" ]; then
     exit 1
 fi
 
-echo "1. Запуск виртуальных машин..."
-vagrant up
+# echo "1. Запуск виртуальных машин..."
+# vagrant up
 
-echo ""
-echo "2. Ожидание готовности машин..."
-sleep 30
+# echo ""
+# echo "2. Ожидание готовности машин..."
+# sleep 30
 
 echo ""
 echo "3. Инициализация Docker Swarm на manager ноде..."

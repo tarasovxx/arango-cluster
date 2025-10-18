@@ -1,175 +1,140 @@
-version: '3.8'
-
-services:
-  # ArangoDB Coordinator ноды
-  arango-coordinator:
-    image: arangodb/arangodb:3.11.0
-    deploy:
-      replicas: 3
-      placement:
-        constraints:
-          - node.role == worker
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-      update_config:
-        parallelism: 1
-        delay: 10s
-        failure_action: rollback
-        monitor: 60s
-        max_failure_ratio: 0.3
-    environment:
-      - ARANGO_ROOT_PASSWORD_FILE=/run/secrets/arango_root_password
-      - ARANGO_NO_AUTH=0
-    secrets:
-      - arango_root_password
-    networks:
-      - arango-network
-    volumes:
-      - arango-coordinator-data:/var/lib/arangodb3
-      - arango-coordinator-apps:/var/lib/arangodb3-apps
-    command: >
-      arangod
-      --server.authentication=true
-      --server.endpoint=tcp://0.0.0.0:8529
-      --cluster.my-address=tcp://arango-coordinator:8529
-      --cluster.my-role=COORDINATOR
-      --cluster.agency-endpoint=tcp://arango-agent:8529
-      --cluster.agency-endpoint=tcp://arango-agent-2:8529
-      --cluster.agency-endpoint=tcp://arango-agent-3:8529
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.arango-coordinator.rule=Host(`arango.localhost`)"
-      - "traefik.http.routers.arango-coordinator.entrypoints=web"
-      - "traefik.http.services.arango-coordinator.loadbalancer.server.port=8529"
-
-  # ArangoDB Agent ноды (для кластера)
-  arango-agent:
-    image: arangodb/arangodb:3.11.0
-    deploy:
-      replicas: 3
-      placement:
-        constraints:
-          - node.role == worker
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-    environment:
-      - ARANGO_ROOT_PASSWORD_FILE=/run/secrets/arango_root_password
-      - ARANGO_NO_AUTH=0
-    secrets:
-      - arango_root_password
-    networks:
-      - arango-network
-    volumes:
-      - arango-agent-data:/var/lib/arangodb3
-    command: >
-      arangod
-      --server.authentication=true
-      --server.endpoint=tcp://0.0.0.0:8529
-      --cluster.my-address=tcp://arango-agent:8529
-      --cluster.my-role=AGENT
-      --cluster.agency-endpoint=tcp://arango-agent:8529
-      --cluster.agency-endpoint=tcp://arango-agent-2:8529
-      --cluster.agency-endpoint=tcp://arango-agent-3:8529
-    labels:
-      - "traefik.enable=false"
-
-  # ArangoDB DBServer ноды
-  arango-dbserver:
-    image: arangodb/arangodb:3.11.0
-    deploy:
-      replicas: 3
-      placement:
-        constraints:
-          - node.role == worker
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-    environment:
-      - ARANGO_ROOT_PASSWORD_FILE=/run/secrets/arango_root_password
-      - ARANGO_NO_AUTH=0
-    secrets:
-      - arango_root_password
-    networks:
-      - arango-network
-    volumes:
-      - arango-dbserver-data:/var/lib/arangodb3
-    command: >
-      arangod
-      --server.authentication=true
-      --server.endpoint=tcp://0.0.0.0:8529
-      --cluster.my-address=tcp://arango-dbserver:8529
-      --cluster.my-role=DBSERVER
-      --cluster.agency-endpoint=tcp://arango-agent:8529
-      --cluster.agency-endpoint=tcp://arango-agent-2:8529
-      --cluster.agency-endpoint=tcp://arango-agent-3:8529
-    labels:
-      - "traefik.enable=false"
-
-  # Traefik для балансировки нагрузки
-  traefik:
-    image: traefik:v2.10
-    deploy:
-      replicas: 2
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-    command:
-      - --api.dashboard=true
-      - --api.insecure=true
-      - --providers.docker=true
-      - --providers.docker.swarmmode=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
-      - --certificatesresolvers.letsencrypt.acme.email=admin@example.com
-      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
-    ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik-letsencrypt:/letsencrypt
-    networks:
-      - arango-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.traefik.rule=Host(`traefik.localhost`)"
-      - "traefik.http.routers.traefik.entrypoints=web"
-      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+version: "3.8"
 
 networks:
-  arango-network:
-    external: true
-
-secrets:
-  arango_root_password:
-    external: true
-  traefik_admin_password:
-    external: true
+  arango-net:
+    driver: overlay
+    attachable: true
 
 volumes:
-  arango-coordinator-data:
-    driver: local
-  arango-coordinator-apps:
-    driver: local
-  arango-agent-data:
-    driver: local
-  arango-dbserver-data:
-    driver: local
-  traefik-letsencrypt:
-    driver: local
+  dbserver-data:
+
+services:
+  # --- 3 агента RAFT (по одному на ноду) ---
+  arango-agent-1:
+    image: arangodb/arangodb:3.8.9
+    networks: [arango-net]
+    environment:
+      - ARANGO_NO_AUTH=1
+    deploy:
+      placement:
+        constraints: ["node.hostname == arango-node1"]
+      restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+    entrypoint: ["sh", "-c"]
+    command: >
+      "IP=$$(hostname -i | awk '{print $$1}');
+      exec arangod
+        --server.endpoint tcp://0.0.0.0:8531
+        --agency.my-address tcp://$$IP:8531
+        --server.authentication false
+        --agency.activate true
+        --agency.size 3
+        --agency.supervision true
+        --agency.endpoint tcp://arango-agent-1:8531
+        --agency.endpoint tcp://arango-agent-2:8531
+        --agency.endpoint tcp://arango-agent-3:8531"
+
+  arango-agent-2:
+    image: arangodb/arangodb:3.8.9
+    networks: [arango-net]
+    environment:
+      - ARANGO_NO_AUTH=1
+    deploy:
+      placement:
+        constraints: ["node.hostname == arango-node2"]
+      restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+    entrypoint: ["sh", "-c"]
+    command: >
+      "IP=$$(hostname -i | awk '{print $$1}');
+      exec arangod
+        --server.endpoint tcp://0.0.0.0:8531
+        --agency.my-address tcp://$$IP:8531
+        --server.authentication false
+        --agency.activate true
+        --agency.size 3
+        --agency.supervision true
+        --agency.endpoint tcp://arango-agent-1:8531
+        --agency.endpoint tcp://arango-agent-2:8531
+        --agency.endpoint tcp://arango-agent-3:8531"
+
+  arango-agent-3:
+    image: arangodb/arangodb:3.8.9
+    networks: [arango-net]
+    environment:
+      - ARANGO_NO_AUTH=1
+    deploy:
+      placement:
+        constraints: ["node.hostname == arango-node3"]
+      restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+    entrypoint: ["sh", "-c"]
+    command: >
+      "IP=$$(hostname -i | awk '{print $$1}');
+      exec arangod
+        --server.endpoint tcp://0.0.0.0:8531
+        --agency.my-address tcp://$$IP:8531
+        --server.authentication false
+        --agency.activate true
+        --agency.size 3
+        --agency.supervision true
+        --agency.endpoint tcp://arango-agent-1:8531
+        --agency.endpoint tcp://arango-agent-2:8531
+        --agency.endpoint tcp://arango-agent-3:8531"
+
+  # --- 3 DBServer (по одному на ноду) ---
+  arango-dbserver:
+    image: arangodb/arangodb:3.8.9
+    networks: [arango-net]
+    environment:
+      - ARANGO_NO_AUTH=1
+    deploy:
+      mode: replicated
+      replicas: 3
+      placement:
+        max_replicas_per_node: 1
+      restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+    volumes:
+      - dbserver-data:/var/lib/arangodb3
+    entrypoint: ["sh", "-c"]
+    command: >
+      "IP=$$(hostname -i | awk '{print $$1}');
+      exec arangod
+        --server.authentication false
+        --server.endpoint tcp://0.0.0.0:8530
+        --cluster.my-address tcp://$$IP:8530
+        --cluster.my-role DBSERVER
+        --cluster.agency-endpoint tcp://arango-agent-1:8531
+        --cluster.agency-endpoint tcp://arango-agent-2:8531
+        --cluster.agency-endpoint tcp://arango-agent-3:8531
+        --database.directory /var/lib/arangodb3"
+
+  # --- 3 Coordinator (статлесс, публикуем 8529 через ingress) ---
+  arango-coordinator:
+    image: arangodb/arangodb:3.8.9
+    networks: [arango-net]
+    environment:
+      - ARANGO_NO_AUTH=1
+    deploy:
+      mode: replicated
+      replicas: 3
+      placement:
+        max_replicas_per_node: 1
+      restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+    tmpfs:
+      - /var/lib/arangodb3:size=1G
+    ports:
+      - target: 8529
+        published: 8529
+        protocol: tcp
+        mode: ingress
+    entrypoint: ["sh", "-c"]
+    command: >
+      "IP=$$(hostname -i | awk '{print $$1}');
+      exec arangod
+        --server.authentication false
+        --server.endpoint tcp://0.0.0.0:8529
+        --cluster.my-address tcp://$$IP:8529
+        --cluster.my-role COORDINATOR
+        --cluster.agency-endpoint tcp://arango-agent-1:8531
+        --cluster.agency-endpoint tcp://arango-agent-2:8531
+        --cluster.agency-endpoint tcp://arango-agent-3:8531
+        --database.directory /var/lib/arangodb3"
+
