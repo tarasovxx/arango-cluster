@@ -8,17 +8,9 @@ set -e
 echo "═══════════════════════════════════════════════════════"
 echo "   Развертывание ArangoDB Stack"
 echo "═══════════════════════════════════════════════════════"
-echo ""
-
-# Проверка что скрипт запущен на manager ноде
-if ! docker info | grep -q "Swarm: active"; then
-    echo "❌ Ошибка: Docker Swarm не активен"
-    echo "💡 Этот скрипт должен выполняться на manager ноде"
-    exit 1
-fi
 
 if ! docker node ls &>/dev/null; then
-    echo "❌ Ошибка: Эта команда должна выполняться на manager ноде!"
+    echo "Эта команда должна выполняться на manager ноде!"
     exit 1
 fi
 
@@ -27,16 +19,17 @@ STACK_FILE="/vagrant/docker-stack.yml"
 if [ ! -f "$STACK_FILE" ]; then
     STACK_FILE="/opt/docker-swarm/docker-stack.yml"
     if [ ! -f "$STACK_FILE" ]; then
-        echo "❌ Ошибка: docker-stack.yml не найден"
+        echo "docker-stack.yml не найден"
         exit 1
     fi
 fi
+
+cp /vagrant/docker-stack.yml /opt/docker-swarm/docker-stack.yml
 
 # Опция для полной очистки
 CLEAN=false
 if [ "$1" == "--clean" ]; then
     CLEAN=true
-    echo "⚠️  Режим полной очистки активирован"
 fi
 
 # Проверка существующего стека

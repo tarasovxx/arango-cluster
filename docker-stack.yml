@@ -7,14 +7,15 @@ networks:
 
 volumes:
   dbserver-data:
+  init-done:
 
 services:
   # --- 3 агента RAFT (по одному на ноду) ---
   arango-agent-1:
-    image: arangodb/arangodb:3.8.9
+    image: arangodb-secrets:3.8.9
     networks: [arango-net]
-    environment:
-      - ARANGO_NO_AUTH=1
+    secrets:
+      - arango_jwt
     deploy:
       placement:
         constraints: ["node.hostname == arango-node1"]
@@ -22,7 +23,8 @@ services:
     command:
       - "arangod"
       - "--server.endpoint=tcp://0.0.0.0:8531"
-      - "--server.authentication=false"
+      - "--server.authentication=true"
+      - "--server.jwt-secret-keyfile=/run/secrets/arango_jwt"
       - "--agency.activate=true"
       - "--agency.size=3"
       - "--agency.supervision=true"
@@ -32,10 +34,10 @@ services:
       - "--agency.endpoint=tcp://arango-agent-3:8531"
 
   arango-agent-2:
-    image: arangodb/arangodb:3.8.9
+    image: arangodb-secrets:3.8.9
     networks: [arango-net]
-    environment:
-      - ARANGO_NO_AUTH=1
+    secrets:
+      - arango_jwt
     deploy:
       placement:
         constraints: ["node.hostname == arango-node2"]
@@ -43,7 +45,8 @@ services:
     command:
       - "arangod"
       - "--server.endpoint=tcp://0.0.0.0:8531"
-      - "--server.authentication=false"
+      - "--server.authentication=true"
+      - "--server.jwt-secret-keyfile=/run/secrets/arango_jwt"
       - "--agency.activate=true"
       - "--agency.size=3"
       - "--agency.supervision=true"
@@ -53,10 +56,10 @@ services:
       - "--agency.endpoint=tcp://arango-agent-3:8531"
 
   arango-agent-3:
-    image: arangodb/arangodb:3.8.9
+    image: arangodb-secrets:3.8.9
     networks: [arango-net]
-    environment:
-      - ARANGO_NO_AUTH=1
+    secrets:
+      - arango_jwt
     deploy:
       placement:
         constraints: ["node.hostname == arango-node3"]
@@ -64,7 +67,8 @@ services:
     command:
       - "arangod"
       - "--server.endpoint=tcp://0.0.0.0:8531"
-      - "--server.authentication=false"
+      - "--server.authentication=true"
+      - "--server.jwt-secret-keyfile=/run/secrets/arango_jwt"
       - "--agency.activate=true"
       - "--agency.size=3"
       - "--agency.supervision=true"
@@ -73,12 +77,11 @@ services:
       - "--agency.endpoint=tcp://arango-agent-2:8531"
       - "--agency.endpoint=tcp://arango-agent-3:8531"
 
-  # --- 3 DBServer (по одному на ноду) ---
   arango-dbserver:
-    image: arangodb/arangodb:3.8.9
+    image: arangodb-secrets:3.8.9
     networks: [arango-net]
-    environment:
-      - ARANGO_NO_AUTH=1
+    secrets:
+      - arango_jwt
     deploy:
       mode: replicated
       replicas: 3
@@ -91,22 +94,24 @@ services:
       - /bin/sh
       - -c
       - |
-        exec arangod \
+        exec /entrypoint.sh arangod \
           --server.endpoint=tcp://0.0.0.0:8530 \
-          --server.authentication=false \
-          --cluster.my-address=tcp://$$HOSTNAME:8530 \
+          --server.authentication=true \
+          --server.jwt-secret-keyfile=/run/secrets/arango_jwt \
+          --cluster.my-address=tcp://$$(hostname):8530 \
           --cluster.my-role=DBSERVER \
           --cluster.agency-endpoint=tcp://arango-agent-1:8531 \
           --cluster.agency-endpoint=tcp://arango-agent-2:8531 \
           --cluster.agency-endpoint=tcp://arango-agent-3:8531 \
           --database.directory=/var/lib/arangodb3
 
-  # --- 3 Coordinator (статлесс, публикуем 8529 через ingress) ---
   arango-coordinator:
-    image: arangodb/arangodb:3.8.9
+    image: arangodb-secrets:3.8.9
     networks: [arango-net]
-    environment:
-      - ARANGO_NO_AUTH=1
+    volumes:
+      - ./server.pem:/etc/arangodb3/keyfile.pem
+    secrets:
+      - arango_jwt
     deploy:
       mode: replicated
       replicas: 3
@@ -124,13 +129,19 @@ services:
       - /bin/sh
       - -c
       - |
-        exec arangod \
-          --server.endpoint=tcp://0.0.0.0:8529 \
-          --server.authentication=false \
-          --cluster.my-address=tcp://$$HOSTNAME:8529 \
+        exec /entrypoint.sh arangod \
+          --server.endpoint=ssl://0.0.0.0:8529 \
+          --server.endpoint=tcp://0.0.0.0:8532 \
+          --server.authentication=true \
+          --ssl.keyfile=/etc/arangodb3/keyfile.pem \
+          --server.jwt-secret-keyfile=/run/secrets/arango_jwt \
+          --cluster.my-address=tcp://$$(hostname):8532 \
           --cluster.my-role=COORDINATOR \
           --cluster.agency-endpoint=tcp://arango-agent-1:8531 \
           --cluster.agency-endpoint=tcp://arango-agent-2:8531 \
           --cluster.agency-endpoint=tcp://arango-agent-3:8531 \
           --database.directory=/var/lib/arangodb3
 
+secrets:
+  arango_jwt:
+    file: ./secrets/arango_jwt
