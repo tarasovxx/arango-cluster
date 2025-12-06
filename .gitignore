@@ -41,3 +41,6 @@ secrets/
 *.crt
 .env
 .env.local
+
+*.csr
+*.key.org

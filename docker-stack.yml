@@ -20,6 +20,16 @@ services:
       placement:
         constraints: ["node.hostname == arango-node1"]
       restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+      update_config:
+        parallelism: 1
+        delay: 60s
+        failure_action: rollback
+        monitor: 30s
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 60s
+        order: stop-first
     command:
       - "arangod"
       - "--server.endpoint=tcp://0.0.0.0:8531"
@@ -42,6 +52,16 @@ services:
       placement:
         constraints: ["node.hostname == arango-node2"]
       restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+      update_config:
+        parallelism: 1
+        delay: 60s
+        failure_action: rollback
+        monitor: 30s
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 60s
+        order: stop-first
     command:
       - "arangod"
       - "--server.endpoint=tcp://0.0.0.0:8531"
@@ -64,6 +84,16 @@ services:
       placement:
         constraints: ["node.hostname == arango-node3"]
       restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+      update_config:
+        parallelism: 1
+        delay: 60s
+        failure_action: rollback
+        monitor: 30s
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 60s
+        order: stop-first
     command:
       - "arangod"
       - "--server.endpoint=tcp://0.0.0.0:8531"
@@ -88,6 +118,16 @@ services:
       placement:
         max_replicas_per_node: 1
       restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+      update_config:
+        parallelism: 1
+        delay: 120s
+        failure_action: rollback
+        monitor: 60s
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 60s
+        order: stop-first
     volumes:
       - dbserver-data:/var/lib/arangodb3
     command:
@@ -108,16 +148,34 @@ services:
   arango-coordinator:
     image: arangodb-secrets:3.8.9
     networks: [arango-net]
+    environment:
+      - DEPLOY_VERSION=v-20251205-211148
     volumes:
       - ./server.pem:/etc/arangodb3/keyfile.pem
     secrets:
       - arango_jwt
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "-q", "-O", "-", "https://127.0.0.1:8529/_api/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     deploy:
       mode: replicated
       replicas: 3
       placement:
         max_replicas_per_node: 1
       restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        monitor: 20s
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 30s
+        order: stop-first
     tmpfs:
       - /var/lib/arangodb3:size=1G
     ports:
@@ -129,6 +187,7 @@ services:
       - /bin/sh
       - -c
       - |
+        echo "Starting coordinator with DEPLOY_VERSION=$${DEPLOY_VERSION}"
         exec /entrypoint.sh arangod \
           --server.endpoint=ssl://0.0.0.0:8529 \
           --server.endpoint=tcp://0.0.0.0:8532 \

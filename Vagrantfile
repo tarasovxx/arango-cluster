@@ -1,106 +1,59 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
+NODES = 3
+
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/jammy64"
   config.vm.box_check_update = false
-
-  config.vm.provider "virtualbox" do |vb|
-    vb.memory = "2048"
-    vb.cpus = 2
-    vb.name = "arango-swarm-node"
-  end
-  
   config.ssh.insert_key = false
-  
+
+  # Общий provisioning для всех нод
   config.vm.provision "shell", inline: <<-SHELL
+    # Docker installation
     apt-get update
-    apt-get upgrade -y
-    
-    apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
-    
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-    
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
+    apt-get install -y ca-certificates curl
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list
     apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-    
+    apt-get install -y docker-ce docker-ce-cli containerd.io
     usermod -aG docker vagrant
-    
-    # Включение и запуск Docker
-    systemctl enable docker
-    systemctl start docker
-    
-    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
-    
-    mkdir -p /opt/docker-swarm
-    
-    cp /vagrant/docker-stack.yml /opt/docker-swarm/
-    if [ -d /vagrant/secrets ]; then
-      cp -r /vagrant/secrets /opt/docker-swarm/
-      chmod 600 /opt/docker-swarm/secrets/*
-    fi
-    if [ -d /vagrant/docker ]; then
-      cp -r /vagrant/docker /opt/docker-swarm/
-    fi
-    if [ -f /vagrant/scripts/*.sh ]; then
-      cp -r /vagrant/scripts /opt/docker-swarm/
-      chmod +x /opt/docker-swarm/scripts/*.sh
-    fi
-    
-    # Сборка кастомного образа ArangoDB с поддержкой Docker Secrets
-    echo "Сборка кастомного образа ArangoDB с поддержкой Docker Secrets..."
-    cd /opt/docker-swarm/docker
-    docker build -t arangodb-secrets:3.8.9 .
-    
-    # Установка прав владельца для пользователя vagrant
-    chown -R vagrant:vagrant /opt/docker-swarm
+
+    # Build custom image
+    cd /vagrant/docker && docker build -t arangodb-secrets:3.8.9 .
   SHELL
 
-  (1..3).each do |i|
+  (1..NODES).each do |i|
     config.vm.define "node#{i}" do |node|
       node.vm.hostname = "arango-node#{i}"
       
-      node.vm.network "private_network", ip: "192.168.56.#{10 + i}", virtualbox__intnet: "arango-swarm-network"
+      # Host-only network (быстрее чем intnet, есть доступ с хоста)
+      node.vm.network "private_network", ip: "192.168.56.#{10 + i}"
       
-      if i == 1
-        node.vm.network "forwarded_port", guest: 8529, host: 8529, host_ip: "127.0.0.1"
-      end
-      
+      # Port forward только на первой ноде
+      node.vm.network "forwarded_port", guest: 8529, host: 8529 if i == 1
+
       node.vm.provider "virtualbox" do |vb|
-        vb.name = "arango-swarm-node#{i}"
-        vb.memory = "2048"
+        vb.name = "arango-node#{i}"
+        vb.memory = 2048
         vb.cpus = 2
-        # Enable CPU features for compatibility with ArangoDB
-        # vb.customize ["modifyvm", :id, "--cpu-profile", "host"]
-        # vb.customize ["modifyvm", :id, "--paravirtprovider", "kvm"]
+        vb.linked_clone = true
       end
-      
+
+      # Swarm init/join
       if i == 1
         node.vm.provision "shell", inline: <<-SHELL
-          # Инициализация Docker Swarm на manager ноде
           docker swarm init --advertise-addr 192.168.56.11
-          
-          # Сохранение токена для присоединения worker нод
           docker swarm join-token worker -q > /vagrant/worker-token.txt
-          
-          # Создание overlay сети (имя должно совпадать с docker-stack.yml)
           docker network create --driver overlay --attachable arango-net || true
         SHELL
       else
         node.vm.provision "shell", inline: <<-SHELL
-          # Ожидание готовности manager ноды
-          sleep 30
-          
-          # Присоединение к Swarm кластеру как worker
-          if [ -f /vagrant/worker-token.txt ]; then
-            TOKEN=$(cat /vagrant/worker-token.txt)
-            docker swarm join --token $TOKEN 192.168.56.11:2377
-          else
-            echo "Worker token not found. Manager node may not be ready yet."
-          fi
+          sleep 10
+          TOKEN=$(cat /vagrant/worker-token.txt)
+          docker swarm join --token $TOKEN 192.168.56.11:2377
         SHELL
       end
     end
