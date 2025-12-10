@@ -32,8 +32,12 @@ Vagrant.configure("2") do |config|
       # Host-only network (быстрее чем intnet, есть доступ с хоста)
       node.vm.network "private_network", ip: "192.168.56.#{10 + i}"
       
-      # Port forward только на первой ноде
-      node.vm.network "forwarded_port", guest: 8529, host: 8529 if i == 1
+      # Port forward только на первой ноде (manager)
+      if i == 1
+        node.vm.network "forwarded_port", guest: 80, host: 80      # HTTP (Traefik)
+        node.vm.network "forwarded_port", guest: 443, host: 443    # HTTPS (Traefik)
+        node.vm.network "forwarded_port", guest: 8529, host: 8529  # ArangoDB direct (fallback)
+      end
 
       node.vm.provider "virtualbox" do |vb|
         vb.name = "arango-node#{i}"

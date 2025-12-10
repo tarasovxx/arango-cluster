@@ -4,12 +4,61 @@ networks:
   arango-net:
     driver: overlay
     attachable: true
+  traefik-public:
+    driver: overlay
+    attachable: true
 
 volumes:
   dbserver-data:
-  init-done:
+  traefik-letsencrypt:
 
 services:
+  # ===========================================
+  # TRAEFIK - Reverse Proxy with Let's Encrypt
+  # ===========================================
+  traefik:
+    image: traefik:v2.11
+    networks:
+      - traefik-public
+      - arango-net
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /vagrant/traefik/traefik.yml:/traefik.yml:ro
+      - /vagrant/traefik/config:/config:ro
+      - traefik-letsencrypt:/letsencrypt
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 5s
+      labels:
+        - "traefik.enable=true"
+        # Dashboard
+        - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.${DOMAIN:-localhost}`)"
+        - "traefik.http.routers.traefik-dashboard.entrypoints=https"
+        - "traefik.http.routers.traefik-dashboard.tls=true"
+        - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.traefik-dashboard.service=api@internal"
+        - "traefik.http.routers.traefik-dashboard.middlewares=traefik-auth@file"
+        - "traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080"
+
+  # ===========================================
+  # ARANGODB CLUSTER
+  # ===========================================
+  
   # --- 3 агента RAFT (по одному на ноду) ---
   arango-agent-1:
     image: arangodb-secrets:3.8.9
@@ -107,6 +156,7 @@ services:
       - "--agency.endpoint=tcp://arango-agent-2:8531"
       - "--agency.endpoint=tcp://arango-agent-3:8531"
 
+  # --- DB Servers ---
   arango-dbserver:
     image: arangodb-secrets:3.8.9
     networks: [arango-net]
@@ -145,21 +195,16 @@ services:
           --cluster.agency-endpoint=tcp://arango-agent-3:8531 \
           --database.directory=/var/lib/arangodb3
 
+  # --- Coordinators (exposed via Traefik) ---
   arango-coordinator:
     image: arangodb-secrets:3.8.9
-    networks: [arango-net]
+    networks:
+      - arango-net
+      - traefik-public
     environment:
-      - DEPLOY_VERSION=v-20251205-211148
-    volumes:
-      - ./server.pem:/etc/arangodb3/keyfile.pem
+      - DEPLOY_VERSION=v-20251209-traefik
     secrets:
       - arango_jwt
-    healthcheck:
-      test: ["CMD", "wget", "--no-check-certificate", "-q", "-O", "-", "https://127.0.0.1:8529/_api/version"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     deploy:
       mode: replicated
       replicas: 3
@@ -176,25 +221,31 @@ services:
         parallelism: 1
         delay: 30s
         order: stop-first
+      labels:
+        - "traefik.enable=true"
+        # HTTP router for ArangoDB Web UI
+        - "traefik.http.routers.arangodb.rule=Host(`arangodb.${DOMAIN:-localhost}`)"
+        - "traefik.http.routers.arangodb.entrypoints=https"
+        - "traefik.http.routers.arangodb.tls=true"
+        - "traefik.http.routers.arangodb.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.arangodb.service=arangodb"
+        # Service definition (no healthcheck - ArangoDB requires auth)
+        - "traefik.http.services.arangodb.loadbalancer.server.port=8529"
+        - "traefik.http.services.arangodb.loadbalancer.sticky.cookie=true"
+        - "traefik.http.services.arangodb.loadbalancer.sticky.cookie.name=arangodb_coordinator"
+        - "traefik.http.services.arangodb.loadbalancer.passHostHeader=true"
     tmpfs:
       - /var/lib/arangodb3:size=1G
-    ports:
-      - target: 8529
-        published: 8529
-        protocol: tcp
-        mode: ingress
     command:
       - /bin/sh
       - -c
       - |
         echo "Starting coordinator with DEPLOY_VERSION=$${DEPLOY_VERSION}"
         exec /entrypoint.sh arangod \
-          --server.endpoint=ssl://0.0.0.0:8529 \
-          --server.endpoint=tcp://0.0.0.0:8532 \
+          --server.endpoint=tcp://0.0.0.0:8529 \
           --server.authentication=true \
-          --ssl.keyfile=/etc/arangodb3/keyfile.pem \
           --server.jwt-secret-keyfile=/run/secrets/arango_jwt \
-          --cluster.my-address=tcp://$$(hostname):8532 \
+          --cluster.my-address=tcp://$$(hostname):8529 \
           --cluster.my-role=COORDINATOR \
           --cluster.agency-endpoint=tcp://arango-agent-1:8531 \
           --cluster.agency-endpoint=tcp://arango-agent-2:8531 \
