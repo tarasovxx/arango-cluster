@@ -1,52 +1,26 @@
-# Dynamic configuration for Traefik
-# This file is watched and reloaded automatically
+# Dynamic Traefik Configuration
+# HTTPS-only access to ArangoDB cluster
 
 http:
   middlewares:
-    # Security headers
     secure-headers:
       headers:
         browserXssFilter: true
         contentTypeNosniff: true
-        frameDeny: true
+        frameDeny: false
         stsIncludeSubdomains: true
-        stsPreload: true
         stsSeconds: 31536000
-        customFrameOptionsValue: "SAMEORIGIN"
     
-    # Basic auth for Traefik dashboard (admin:admin - change in production!)
-    # Generate new password: htpasswd -nb admin yourpassword
+    # Basic auth for Traefik dashboard
+    # Default: admin / admin (change with: htpasswd -nb admin newpassword)
     traefik-auth:
       basicAuth:
         users:
-          - "admin:$apr1$ruca84Hq$mbjdMZBAG.KWn7vfN/SNK/"
+          - "admin:$apr1$mfRbWWtR$Xob70KR2A6Jeg0g7Y1SOd/"
 
-  # Routers
-  routers:
-    # Traefik dashboard (HTTP for local development)
-    traefik-http:
-      rule: "PathPrefix(`/api`) || PathPrefix(`/dashboard`)"
-      entryPoints:
-        - http
-      service: api@internal
-      middlewares:
-        - traefik-auth
-
-    # ArangoDB via HTTP (for local development without TLS)
-    arangodb-http:
-      rule: "PathPrefix(`/`)"
-      entryPoints:
-        - http
-      service: arangodb-local
-      priority: 1
-
-  services:
-    arangodb-local:
-      loadBalancer:
-        servers:
-          - url: "http://arango-coordinator:8529"
-        passHostHeader: true
-        sticky:
-          cookie:
-            name: arangodb_coordinator
-
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/traefik.crt
+        keyFile: /certs/traefik.key

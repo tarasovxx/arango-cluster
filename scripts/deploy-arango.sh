@@ -2,13 +2,19 @@
 set -e
 
 STACK_FILE="${STACK_FILE:-/vagrant/docker-stack.yml}"
+CERT_DIR="/vagrant/traefik/certs"
 
-# Default domain (change for production)
-export DOMAIN="${DOMAIN:-localhost}"
-
-echo "Deploying ArangoDB cluster with Traefik..."
-echo "Domain: $DOMAIN"
+echo "=============================================="
+echo "  ArangoDB Cluster Deployment (HTTPS)"
+echo "=============================================="
 echo ""
+
+# Generate certificate if not exists
+if [ ! -f "$CERT_DIR/traefik.crt" ]; then
+    echo "Generating TLS certificate..."
+    /vagrant/scripts/generate-certs.sh
+    echo ""
+fi
 
 # Clean mode
 if [ "$1" = "--clean" ]; then
@@ -19,10 +25,12 @@ if [ "$1" = "--clean" ]; then
         sleep 20
     fi
     docker volume rm arango_dbserver-data 2>/dev/null || true
-    docker volume rm arango_traefik-letsencrypt 2>/dev/null || true
+    echo "Cleanup complete."
+    echo ""
 fi
 
-# Create networks if they don't exist
+# Create networks
+echo "Creating overlay networks..."
 docker network create --driver overlay --attachable arango-net 2>/dev/null || true
 docker network create --driver overlay --attachable traefik-public 2>/dev/null || true
 
@@ -39,11 +47,19 @@ echo "=== Service Status ==="
 docker service ls --filter "name=arango_"
 
 echo ""
-echo "=== Access URLs ==="
-echo "ArangoDB Web UI: https://arangodb.${DOMAIN}"
-echo "Traefik Dashboard: https://traefik.${DOMAIN}"
+echo "=============================================="
+echo "  Deployment Complete!"
+echo "=============================================="
 echo ""
-echo "Direct access (fallback): http://192.168.56.11:8529"
+echo "Access (use HTTPS!):"
 echo ""
-echo "Default Traefik login: admin / admin"
-echo "ArangoDB login: root (set password on first login)"
+echo "  ArangoDB Web UI:    https://192.168.56.11"
+echo "  Traefik Dashboard:  https://192.168.56.11/dashboard/"
+echo ""
+echo "Credentials:"
+echo "  Traefik: admin / admin"
+echo "  ArangoDB: root (set password on first login)"
+echo ""
+echo "Note: Browser will warn about self-signed certificate."
+echo "      Click 'Advanced' -> 'Proceed' to continue."
+echo ""

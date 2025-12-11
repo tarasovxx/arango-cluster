@@ -1,9 +1,9 @@
-# Traefik Configuration for Docker Swarm
-# https://doc.traefik.io/traefik/
+# Traefik Configuration - HTTPS Only with Self-Signed Certificate
+# Access: https://192.168.56.11
 
 api:
   dashboard: true
-  insecure: true  # Allow dashboard on HTTP for local development
+  insecure: false
 
 log:
   level: INFO
@@ -11,6 +11,12 @@ log:
 entryPoints:
   http:
     address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: https
+          scheme: https
+          permanent: true
   https:
     address: ":443"
 
@@ -20,28 +26,22 @@ providers:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
     swarmMode: true
-    network: traefik-public
+    network: arango_traefik-public
     watch: true
   file:
     directory: /config
     watch: true
 
-# Let's Encrypt - ONLY works with real domain and public IP!
-# For localhost/private IP, use self-signed certificates (see config/dynamic.yml)
-certificatesResolvers:
-  letsencrypt:
-    acme:
-      # CHANGE THIS to your email before using Let's Encrypt
-      email: your-email@example.com
-      storage: /letsencrypt/acme.json
-      # Use staging server first for testing (uncomment below, comment production)
-      # caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
-      httpChallenge:
-        entryPoint: http
-
-# TLS configuration
+# TLS configuration - use self-signed certificate
 tls:
   options:
     default:
       minVersion: VersionTLS12
-
+  certificates:
+    - certFile: /certs/traefik.crt
+      keyFile: /certs/traefik.key
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/traefik.crt
+        keyFile: /certs/traefik.key

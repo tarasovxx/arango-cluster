@@ -44,3 +44,5 @@ secrets/
 
 *.csr
 *.key.org
+
+worker-token.txt

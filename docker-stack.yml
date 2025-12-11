@@ -1,5 +1,10 @@
 version: "3.8"
 
+# ===========================================
+# ArangoDB Cluster with Traefik (HTTPS-only)
+# Access: https://192.168.56.11
+# ===========================================
+
 networks:
   arango-net:
     driver: overlay
@@ -10,11 +15,10 @@ networks:
 
 volumes:
   dbserver-data:
-  traefik-letsencrypt:
 
 services:
   # ===========================================
-  # TRAEFIK - Reverse Proxy with Let's Encrypt
+  # TRAEFIK - Reverse Proxy (HTTPS with TLS)
   # ===========================================
   traefik:
     image: traefik:v2.11
@@ -34,7 +38,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /vagrant/traefik/traefik.yml:/traefik.yml:ro
       - /vagrant/traefik/config:/config:ro
-      - traefik-letsencrypt:/letsencrypt
+      - /vagrant/traefik/certs:/certs:ro
     deploy:
       mode: replicated
       replicas: 1
@@ -44,22 +48,25 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+        max_attempts: 10
       labels:
         - "traefik.enable=true"
-        # Dashboard
-        - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.${DOMAIN:-localhost}`)"
+        # Traefik Dashboard - https://192.168.56.11/dashboard/
+        - "traefik.http.routers.traefik-dashboard.rule=PathPrefix(`/api`) || PathPrefix(`/dashboard`)"
         - "traefik.http.routers.traefik-dashboard.entrypoints=https"
         - "traefik.http.routers.traefik-dashboard.tls=true"
-        - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
         - "traefik.http.routers.traefik-dashboard.service=api@internal"
-        - "traefik.http.routers.traefik-dashboard.middlewares=traefik-auth@file"
+        - "traefik.http.routers.traefik-dashboard.middlewares=dashboard-auth"
+        - "traefik.http.routers.traefik-dashboard.priority=100"
+        # Basic Auth middleware (admin:admin) - $$ escapes $ in docker-compose
+        - "traefik.http.middlewares.dashboard-auth.basicauth.users=admin:$$apr1$$mfRbWWtR$$Xob70KR2A6Jeg0g7Y1SOd/"
         - "traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080"
 
   # ===========================================
   # ARANGODB CLUSTER
   # ===========================================
   
-  # --- 3 агента RAFT (по одному на ноду) ---
+  # --- 3 RAFT Agents ---
   arango-agent-1:
     image: arangodb-secrets:3.8.9
     networks: [arango-net]
@@ -156,7 +163,7 @@ services:
       - "--agency.endpoint=tcp://arango-agent-2:8531"
       - "--agency.endpoint=tcp://arango-agent-3:8531"
 
-  # --- DB Servers ---
+  # --- 3 DB Servers (data replication) ---
   arango-dbserver:
     image: arangodb-secrets:3.8.9
     networks: [arango-net]
@@ -195,14 +202,14 @@ services:
           --cluster.agency-endpoint=tcp://arango-agent-3:8531 \
           --database.directory=/var/lib/arangodb3
 
-  # --- Coordinators (exposed via Traefik) ---
+  # --- 3 Coordinators (load balanced by Traefik) ---
   arango-coordinator:
     image: arangodb-secrets:3.8.9
     networks:
       - arango-net
       - traefik-public
     environment:
-      - DEPLOY_VERSION=v-20251209-traefik
+      - DEPLOY_VERSION=v1765362805
     secrets:
       - arango_jwt
     deploy:
@@ -210,7 +217,10 @@ services:
       replicas: 3
       placement:
         max_replicas_per_node: 1
-      restart_policy: { condition: any, delay: 5s, max_attempts: 10 }
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
       update_config:
         parallelism: 1
         delay: 30s
@@ -223,24 +233,25 @@ services:
         order: stop-first
       labels:
         - "traefik.enable=true"
-        # HTTP router for ArangoDB Web UI
-        - "traefik.http.routers.arangodb.rule=Host(`arangodb.${DOMAIN:-localhost}`)"
+        # ArangoDB - https://192.168.56.11/
+        - "traefik.http.routers.arangodb.rule=PathPrefix(`/`)"
         - "traefik.http.routers.arangodb.entrypoints=https"
         - "traefik.http.routers.arangodb.tls=true"
-        - "traefik.http.routers.arangodb.tls.certresolver=letsencrypt"
         - "traefik.http.routers.arangodb.service=arangodb"
-        # Service definition (no healthcheck - ArangoDB requires auth)
+        - "traefik.http.routers.arangodb.priority=1"
+        # Load balancing with sticky sessions
         - "traefik.http.services.arangodb.loadbalancer.server.port=8529"
         - "traefik.http.services.arangodb.loadbalancer.sticky.cookie=true"
         - "traefik.http.services.arangodb.loadbalancer.sticky.cookie.name=arangodb_coordinator"
-        - "traefik.http.services.arangodb.loadbalancer.passHostHeader=true"
+        - "traefik.http.services.arangodb.loadbalancer.sticky.cookie.secure=true"
+        - "traefik.http.services.arangodb.loadbalancer.sticky.cookie.httpOnly=true"
     tmpfs:
       - /var/lib/arangodb3:size=1G
     command:
       - /bin/sh
       - -c
       - |
-        echo "Starting coordinator with DEPLOY_VERSION=$${DEPLOY_VERSION}"
+        echo "Starting coordinator $${DEPLOY_VERSION} on $$(hostname)"
         exec /entrypoint.sh arangod \
           --server.endpoint=tcp://0.0.0.0:8529 \
           --server.authentication=true \
